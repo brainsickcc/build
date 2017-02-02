@@ -1,0 +1,428 @@
+#!/bin/bash
+# -*- indent-tabs-mode: nil -*-
+
+# Copyright © 2017 Iain Nicol
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -efu -o pipefail
+
+APP=bscc
+ARCH="$(arch)"
+
+SRCDIR=/brainsick/bscc
+pushd "$SRCDIR"
+VERSION="$(git describe --abbrev=0 | sed 's/^v//')"
+popd
+
+if [ -d "$APP/$APP.AppDir" ]; then
+    find "$APP/$APP.AppDir" -type d -print0 | xargs -0 chmod u+w;
+    rm -rf "$APP/$APP.AppDir/";
+fi
+mkdir -p "$APP/$APP.AppDir"
+
+pushd "$APP"
+pushd "$APP.AppDir"
+
+rsync -a --relative ../.././usr ./
+
+copy_mingw()
+{
+    cp --parents /usr/bin/i686-w64-mingw32-gcc ./
+    cp --parents /usr/bin/i686-w64-mingw32-ld ./
+    local LIBDIR="/usr/i686-w64-mingw32/sys-root/mingw/lib"
+    local GCC_VERSION="$(i686-w64-mingw32-gcc -dumpversion)"
+    local LIBDIR_GCC="/usr/lib/gcc/i686-w64-mingw32/$GCC_VERSION"
+    cp --parents "$LIBDIR/crt2.o" .
+    cp --parents "$LIBDIR_GCC/crtbegin.o" .
+    cp --parents "$LIBDIR_GCC/libgcc.a" .
+    cp --parents "$LIBDIR/libmingw32.a" .
+    cp --parents "$LIBDIR/libmingwex.a" .
+    cp --parents "$LIBDIR/libmsvcrt.a" .
+    cp --parents "$LIBDIR/libuser32.a" .
+    cp --parents "$LIBDIR/libkernel32.a" .
+    cp --parents "$LIBDIR_GCC/crtend.o" .
+}
+echo "copy_mingw"
+copy_mingw
+
+convert -size 256x256 xc:black bscc.png
+cat > bscc.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=bscc
+GenericName=Compiler for VB language
+# The program is batch, not interactive; no need to display in the menu.
+NoDisplay=true
+Exec=bscc %F
+Icon=bscc
+Categories=Development
+Comment=Brainsick code compiler
+Terminal=true
+EOF
+
+copy_deps()
+{
+    local LDD_INFO="$(find . -type f \
+                           \( -executable \
+                              -or -name '*.so.*' \
+                              -or -name '*.so' \
+                           \) \
+                           -print0 \
+                      | sort -z | uniq -z \
+                      | xargs -0 --no-run-if-empty ldd)"
+    local LDD_REGEX="^\s\+\(.\+\) => \(.\+\) (0x[0-9a-f]\+)$"
+    if LDD_INFO="$(grep -e "$LDD_REGEX" <<<"$LDD_INFO")"; then
+        local DEPS="$(sed "s/$LDD_REGEX/\2/" <<<"$LDD_INFO")"
+        printf "%s\n" "$DEPS" | while IFS=$'\n' read -r DEP; do
+            rsync -aL --relative "$DEP" ./
+        done
+    fi
+}
+echo "copy_deps"
+# Multiple runs to copy indirect dependencies.
+copy_deps && copy_deps && copy_deps
+
+
+merge_into()
+{
+    if [ -d "$1" ]; then
+        rsync -a "$1" "$2"
+        chmod u+w "$1"
+        rm -rf "$1"
+    fi
+}
+
+move_lib()
+{
+    merge_into usr/local/ usr/
+    merge_into lib/ usr/lib/
+    merge_into lib64/ usr/lib64/
+}
+
+echo "move_lib"
+move_lib
+
+
+function get_apprun()
+{
+    cp "$HOME/appimage/AppRun-$ARCH" AppRun
+    chmod a+x AppRun
+}
+
+echo "get_apprun"
+get_apprun
+
+
+rm_harder()
+{
+    local DIR="$(dirname "$1")"
+    local MOD="$(stat -c '%a' "$DIR")"
+    chmod u+w "$DIR"
+    rm "$1"
+    chmod "$MOD" "$DIR"
+}
+
+delete_blacklisted()
+{
+    local BLACKLISTED_FILES="$(cat "$HOME/appimage/excludelist" \
+                               | sed '/^\s*$/d' | sed '/^#.*$/d')"
+    printf "%s\n" "$BLACKLISTED_FILES" | while IFS=$'\n' read -r FILE; do
+        find . -xtype f -name "$FILE" -print0 | \
+            while IFS= read -r -d $'\0' FOUND_FILE; do
+                rm_harder "$FOUND_FILE"
+            done
+    done
+}
+
+echo "delete_blacklisted"
+delete_blacklisted
+
+
+attribute_brainsick()
+{
+    cp "$SRCDIR/COPYING" .
+    cp "$SRCDIR/NEWS" .
+    cp "$SRCDIR/README" .
+}
+
+attribute_llvm()
+{
+    local SRC="$HOME/llvm"
+    local DEST="$(pwd)/usr/share/doc/llvm"
+    mkdir -p "$DEST"
+    pushd "$SRC"
+    local COMMIT="$(git rev-parse --verify HEAD)"
+    # With newer git could use higher level: git ls-remote --get-url.
+    local URL="$(git config --get remote.origin.url)"
+    popd
+    cat <<EOF > "$DEST/source-code.txt"
+$URL
+Commit: $COMMIT
+EOF
+    cp "$SRC/CREDITS.TXT" "$DEST"
+    cp "$SRC/LICENSE.TXT" "$DEST"
+}
+
+attribute_appimagekit()
+{
+    local DEST="$(pwd)/usr/share/doc/appimagekit"
+    mkdir -p "$DEST"
+    cat <<EOF > "$DEST/source-code.txt"
+https://github.com/probonopd/AppImageKit
+https://github.com/probonopd/AppImages
+EOF
+    cat <<EOF > "$DEST/credits.txt"
+MIT License
+
+Copyright (c) 2004-16 Simon Peter
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+EOF
+}
+
+guess_rpm_of_file()
+{
+    local POSS_FILE1="$(sed -e 's|^\.||' <<<"$1")"
+    local POSS_FILE2="$(sed -e 's|^/usr/lib/|/lib/|' <<<"$POSS_FILE1")"
+    local POSS_FILE3="$(sed -e 's|^/usr/lib64/|/lib64/|' <<<"$POSS_FILE1")"
+    for POSS_FILE in "$POSS_FILE1" "$POSS_FILE2" "$POSS_FILE3"; do
+        if [ -f "$POSS_FILE" ]; then
+            FILE="$POSS_FILE"
+            rpm -qf "$FILE" >> ../PACKAGES
+        fi
+    done
+}
+get_used_rpms()
+{
+    export -f guess_rpm_of_file
+    rm -f ../PACKAGES
+    find . -type f -print0 \
+        | xargs -0 -n1 -I'{}' \
+                bash -c 'set -efu -o pipefail && guess_rpm_of_file {}'
+    local PACKAGES="$(cat ../PACKAGES | sort | uniq)"
+    rm ../PACKAGES
+    printf "%s" "$PACKAGES"
+}
+get_version_of_rpm()
+{
+    local RPM="$1"
+    rpm -q --queryformat="%{VERSION}\n" "$RPM"
+}
+get_name_of_rpm()
+{
+    local RPM="$1"
+    local SUFFIX="$(rpm -q \
+                        --queryformat="-%{VERSION}-%{RELEASE}.%{ARCH}\n" \
+                        "$RPM")"
+    printf "%s" "${RPM%$SUFFIX}"
+}
+get_filename_of_corresponding_src_rpm()
+{
+    local RPM="$1"
+    rpm -q --queryformat="%{SOURCERPM}\n" "$RPM"
+}
+get_name_of_corresponding_src_rpm()
+{
+    local RPM="$1"
+    local SRC_RPM_FILENAME="$(get_filename_of_corresponding_src_rpm "$RPM")"
+    local SUFFIX="$(rpm -q \
+                        --queryformat="-%{VERSION}-%{RELEASE}.src.rpm\n" \
+                        "$RPM")"
+    printf "%s" "${SRC_RPM_FILENAME%$SUFFIX}"
+}
+rpm_copy_license()
+{
+    local RPM="$1"
+    local DEST="$2"
+    local SRC_RPM_NAME="$(get_name_of_corresponding_src_rpm "$RPM")"
+    local VERSION="$(rpm -q --queryformat="%{VERSION}" "$RPM")"
+    local SRCDIR_TYPICAL="/usr/share/doc/$SRC_RPM_NAME-$VERSION"
+    local RPM_NAME="$(get_name_of_rpm "$RPM")"
+    case $RPM_NAME in
+        glibc)
+            cp "$SRCDIR_TYPICAL/COPYING" "$DEST"
+            cp "$SRCDIR_TYPICAL/COPYING.LIB" "$DEST"
+            cp "$SRCDIR_TYPICAL/LICENSES" "$DEST"
+            ;;
+        gmp)
+            cp "$SRCDIR_TYPICAL/COPYING" "$DEST"
+            cp "$SRCDIR_TYPICAL/COPYING.LIB" "$DEST"
+            cp "$SRCDIR_TYPICAL/README" "$DEST"
+            ;;
+        mingw32-binutils)
+            cp "/usr/share/doc/mingw-binutils-generic-$VERSION/COPYING" "$DEST"
+            ;;
+        mingw32-crt)
+            cp "/usr/share/doc/mingw32-crt-$VERSION/COPYING" "$DEST"
+            cp "/usr/share/doc/mingw32-crt-$VERSION/DISCLAIMER" "$DEST"
+            cp "/usr/share/doc/mingw32-crt-$VERSION/DISCLAIMER.PD" "$DEST"
+            ;;
+        mingw32-gcc)
+            set +f
+            local GCC_TAR="$(ls "$HOME/rpmbuild/SOURCES/gcc-"*".tar."*)"
+            local GCC_TAR_BASENAME="$(basename "$GCC_TAR" \
+                                      | sed -e 's/\.tar.*//')"
+            set -f
+            tar -xf "$GCC_TAR" -C "$DEST" --strip=1 \
+                "$GCC_TAR_BASENAME/COPYING" \
+                "$GCC_TAR_BASENAME/COPYING.LIB" \
+                "$GCC_TAR_BASENAME/COPYING3" \
+                "$GCC_TAR_BASENAME/COPYING3.LIB" \
+                "$GCC_TAR_BASENAME/COPYING.RUNTIME" \
+                ;
+            ;;
+        ncurses-libs)
+            cp "$SRCDIR_TYPICAL/AUTHORS" "$DEST"
+            ;;
+        *)
+            printf "rpm_copy_license: unrecognized: %s\n" "$RPM_NAME" >&2
+            false
+            ;;
+    esac
+}
+get_repo_of_rpm()
+{
+    local RPM="$1"
+    yumdb get from_repo "$1" 2>/dev/null \
+        | grep -e 'from_repo = ' \
+        | sed -e 's/\s*from_repo = //'
+}
+get_upstream_url_for_rpm()
+{
+    local RPM="$1"
+    rpm -q --queryformat="%{URL}\n" "$RPM"
+}
+rpm_get_corresponding_src_url_etc()
+{
+    local RPM="$1"
+    local CENTOS_VERSION="$(cat /etc/centos-release \
+                            | grep -oe '[0-9]\+\(\.[0-9]\+\)*')"
+    local CENTOS_VERSION_MAJOR="$(grep -oe '^[0-9]\+' <<<"$CENTOS_VERSION")"
+    local EPEL_VERSION="$CENTOS_VERSION_MAJOR"
+    local REPO="$(get_repo_of_rpm "$RPM")"
+    local REPO_LOWERCASE="$(tr '[:upper:]' '[:lower:]' <<<"$REPO")"
+    case $REPO_LOWERCASE in
+        base|centos)
+            local BASE_URL="https://archive.kernel.org/centos-vault/$CENTOS_VERSION/os/Source/SPackages"
+            local RPM_MIRROR="http://vault.centos.org"
+            local RPM_EXTRA_INFO="RPM Mirror: $RPM_MIRROR"
+            ;;
+        updates)
+            local BASE_URL="https://archive.kernel.org/centos-vault/$CENTOS_VERSION/updates/Source/SPackages"
+            local RPM_MIRROR="http://vault.centos.org"
+            local RPM_EXTRA_INFO="RPM Mirror: $RPM_MIRROR"
+            ;;
+        epel)
+            local BASE_URL="https://dl.fedoraproject.org/pub/epel/$EPEL_VERSION/SRPMS"
+            local RPM_MIRROR_LIST="https://mirrors.fedoraproject.org/mirrorlist?repo=epel-$EPEL_VERSION&arch=$ARCH"
+            local RPM_EXTRA_INFO="RPM Mirror List: $RPM_MIRROR_LIST"
+            ;;
+        *)
+            printf "rpm_get_corresponding_src_url_etc: unrecognized: %s\n" \
+                   "$REPO_LOWERCASE" \
+                   >&2
+            false
+            ;;
+    esac
+    local FILENAME="$(get_filename_of_corresponding_src_rpm "$RPM")"
+    local URL="$BASE_URL/$FILENAME"
+    local UPSTREAM_URL="$(get_upstream_url_for_rpm "$RPM")"
+    cat <<EOF
+RPM URL: $URL
+$RPM_EXTRA_INFO
+Upstream URL: $UPSTREAM_URL
+EOF
+}
+attribute_rpm()
+{
+    local RPM="$1"
+    local SRC_RPM_NAME="$(get_name_of_corresponding_src_rpm "$RPM")"
+    local DEST="usr/share/doc/$SRC_RPM_NAME"
+    mkdir -p "$DEST"
+    rpm_copy_license "$RPM" "$DEST"
+    rpm_get_corresponding_src_url_etc "$RPM" > "$DEST/source-code.txt"
+}
+attribute_rpms()
+{
+    local PACKAGES="$(get_used_rpms)"
+    printf "%s\n" "$PACKAGES" | while IFS=$'\n' read -r PACKAGE; do
+        attribute_rpm "$PACKAGE"
+    done
+}
+
+attribute()
+{
+    attribute_brainsick
+    attribute_llvm
+    attribute_appimagekit
+    attribute_rpms
+}
+
+echo "attribute"
+attribute
+
+
+patch_usr_single()
+{
+    local DIR="$(dirname "$1")"
+    local MOD="$(stat -c '%a' "$DIR")"
+    chmod u+w "$DIR"
+    sed -i -e "s|/usr|././|g" "$1"
+    chmod "$MOD" "$DIR"
+}
+
+export -f patch_usr_single
+patch_usr()
+{
+    find usr/ -type f -executable -print0 \
+        | xargs -0 -n1 -I'{}' \
+                bash -c 'set -efu -o pipefail && patch_usr_single {}'
+}
+
+echo "patch_usr"
+patch_usr
+
+
+popd
+function generate_appimage()
+{
+    mkdir -p ../out
+    local OUT_PATH="../out/$APP-$VERSION-$ARCH.AppImage"
+    rm -f "$OUT_PATH"
+    "$HOME/appimage/AppImageAssistant" "./$APP.AppDir/" "$OUT_PATH"
+}
+
+echo "generate_appimage"
+generate_appimage
+
+
+popd
+mv "out/$APP-$VERSION-$ARCH.AppImage" "out/$APP-$ARCH.AppImage"

@@ -1,0 +1,113 @@
+#!/bin/bash
+# -*- indent-tabs-mode: nil -*-
+
+# Copyright © 2017 Iain Nicol
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -efu -o pipefail
+
+WORKDIR="$(pwd)"
+
+yum clean expire-cache
+
+# In CentOS 6, we need to force yum to install docs so that licenses are
+# installed.
+sudo sed -ie '/nodocs/d' /etc/yum.conf
+sudo yum reinstall -y \
+     glibc \
+     gmp \
+     ncurses \
+     ;
+
+# EPEL repo provides MinGW.
+sudo yum install -y epel-release
+sudo yum install -y \
+     fuse fuse-libs \
+     gcc-c++ \
+     git \
+     help2man \
+     ImageMagick \
+     mingw32-binutils \
+     mingw32-crt \
+     mingw32-gcc \
+     ncurses-devel \
+     wget \
+     yum-utils \
+     zlib-devel \
+     ;
+
+sudo adduser -s /sbin/nologin mockbuild # Prevent warning during rpm -i.
+sudo usermod -aG fuse "$USER" # For AppImage generation
+
+# Download MinGW source so we can place COPYING.RUNTIME into the
+# AppImage.
+yumdownloader --source mingw32-gcc
+rpm -i mingw-gcc-*.src.rpm
+
+# Don't get LLVM from EPEL.  With EPEL's version, when we try to link
+# bscc we discover the .so version of libffi is wrong.
+git clone https://github.com/llvm-mirror/llvm
+pushd llvm
+git checkout ae913f615f190fba049ae83279949a620f221426 # v3.4.2
+./configure --prefix=/usr/local --enable-optimized --enable-shared
+NUM_CPUS="$(grep -c ^processor /proc/cpuinfo)"
+make -j"$NUM_CPUS" && sudo make install
+popd
+
+echo "/usr/local/lib" | sudo tee -a /etc/ld.so.conf
+sudo ldconfig
+
+download()
+{
+    local url="$1"
+    local sha256="$2"
+
+    local outName="$(basename "$url")"
+    wget -c "$url" -O "$outName"
+    local sha256Actual="$(sha256sum -b "$outName" | cut -d' ' -f1)"
+    [ "$sha256" = "$sha256Actual" ]
+}
+
+mkdir appimage
+pushd appimage
+download "https://github.com/probonopd/AppImageKit/releases/download/6/AppRun_6-x86_64" \
+         "28b9c59facd7d0211ef5d825cc00873324cc75163902c48e80e34bf314c910c4"
+mv AppRun_6-x86_64 AppRun-x86_64
+download "https://cdn.rawgit.com/probonopd/AppImages/62cfb58ae1d93da7f75bb000e52c5e16fded9c68/excludelist" \
+         "75a2dfe66b90c9ac40c3e7175a108afe6fa237e57e99a762c88b797605ba4137"
+download "https://github.com/probonopd/AppImageKit/releases/download/6/AppImageAssistant_6-x86_64.AppImage" \
+         "e792fa6ba1dd81de6438844fde39aa12d6b6d15238154ec46baf01da1c92d59f"
+mv AppImageAssistant_6-x86_64.AppImage AppImageAssistant
+chmod a+x AppImageAssistant
+popd
+
+curl -sSL https://get.haskellstack.org/ | sh
+
+pushd /brainsick/bscc
+./bootstrap
+# Download Haskell dependencies.  We won't build them now because
+# Docker makes the mount readonly.
+#
+# Copy because otherwise Stack, as of v1.3.2, will try to create a
+# .stack-work folder inside the readonly mount.  It does this even
+# though it's pointless to do so for a dry run.
+mkdir "$WORKDIR/bscc-small-copy"
+find . \( -name "stack.yaml" -or -name "*.cabal" \) -print0 \
+    | xargs -0 cp --parents -t ~/bscc-small-copy
+pushd "$WORKDIR/bscc-small-copy"
+stack build --prefetch --dry-run
+popd
+rm -rf "$WORKDIR/bscc-small-copy"
+popd

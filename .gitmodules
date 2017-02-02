@@ -1,0 +1,8 @@
+[submodule "bscc"]
+	path = bscc
+	url = ../bscc.git
+	branch = master
+[submodule "libvbstd"]
+	path = libvbstd
+	url = ../libvbstd.git
+	branch = master

@@ -1,0 +1,24 @@
+Copyright © 2017 Iain Nicol
+See the end of the file for license conditions.
+
+
+The Brainsick code compiler (bscc) is an open source compiler for the
+classic, pre‐.NET, Visual Basic (VB) language.  Specifically, we aim for
+compatibility with the Visual Basic 6 (VB6) dialect.
+
+This repository contains the build script, for easily building the
+various components.  See the file INSTALL for instructions.
+
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.

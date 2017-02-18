@@ -1,0 +1,34 @@
+# TODO: use the brainsick/build docker image.  That way we won't have to
+# run bootstrap, which is slow, every build.
+image: centos:6
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_STRATEGY: fetch
+
+before_script:
+  - ln -s -T /builds/brainsick/build /brainsick
+  - NONROOT_UID=1000
+  - chown -R "$NONROOT_UID" /builds/brainsick/build
+  - >-
+    yum install -y sudo
+    && echo '%wheel  ALL=(ALL)  NOPASSWD: ALL' >> /etc/sudoers
+    && useradd -m build -Uu "$NONROOT_UID" -G wheel
+    && echo 'build:build' | chpasswd
+  - cd /home/build
+  - cp /brainsick/build-aux/docker/bootstrap .
+  - chown build:build bootstrap
+  - su build -c ./bootstrap
+  - rm bootstrap
+  - gpasswd -d build wheel && yum remove -y sudo
+  - cp /brainsick/build-aux/docker/build /brainsick/build-aux/docker/build-appimage ./
+  - chown build:build build build-appimage
+
+build:
+  script:
+    - cd /home/build
+    - su build -c /home/build/build
+  artifacts:
+    paths:
+      - out/
+

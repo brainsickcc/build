@@ -46,10 +46,15 @@ copy_mingw()
     local LIBDIR_GCC="/usr/lib/gcc/i686-w64-mingw32/$GCC_VERSION"
     cp --parents "$LIBDIR/crt2.o" .
     cp --parents "$LIBDIR_GCC/crtbegin.o" .
+    cp --parents "$LIBDIR/libuserenv.a" .
+    cp --parents "$LIBDIR/libws2_32.a" .
     cp --parents "$LIBDIR_GCC/libgcc.a" .
+    cp --parents "$LIBDIR_GCC/libgcc_eh.a" .
     cp --parents "$LIBDIR/libmingw32.a" .
     cp --parents "$LIBDIR/libmingwex.a" .
     cp --parents "$LIBDIR/libmsvcrt.a" .
+    cp --parents "$LIBDIR/libadvapi32.a" .
+    cp --parents "$LIBDIR/libshell32.a" .
     cp --parents "$LIBDIR/libuser32.a" .
     cp --parents "$LIBDIR/libkernel32.a" .
     cp --parents "$LIBDIR_GCC/crtend.o" .

@@ -23,7 +23,8 @@ export PREFIX=/brainsick/out
 cd /brainsick
 
 cd libvbstd
-make LLC=llc
+source "$HOME/.cargo/env"
+make
 make install PREFIX="$WIP_PREFIX"
 
 cd ../bscc

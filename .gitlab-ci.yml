@@ -16,7 +16,11 @@ before_script:
     && useradd -m build -Uu "$NONROOT_UID" -G wheel
     && echo 'build:build' | chpasswd
   - cd /home/build
-  - cp /brainsick/build-aux/docker/bootstrap .
+  - >-
+    cp
+    /brainsick/build-aux/docker/bootstrap
+    /brainsick/build-aux/docker/mingw-gcc.spec
+    .
   - chown build:build bootstrap
   - su build -c ./bootstrap
   - rm bootstrap

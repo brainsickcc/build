@@ -311,18 +311,59 @@ rpm_copy_license()
 get_repo_of_rpm()
 {
     local RPM="$1"
-    yumdb get from_repo "$1" 2>/dev/null \
-        | grep -e 'from_repo = ' \
-        | sed -e 's/\s*from_repo = //'
+    local RPM_NAME="$(get_name_of_rpm "$RPM")"
+    local REPO="$(yumdb get from_repo "$1" 2>/dev/null \
+                  | grep -e 'from_repo = ' \
+                  | sed -e 's/\s*from_repo = //')"
+    case $REPO in
+        /*)
+            # Locally installed, that is from a file.
+            local SRC_RPM_NAME="$(get_name_of_corresponding_src_rpm "$RPM")"
+            case $SRC_RPM_NAME in
+                mingw-gcc)
+                    echo "epel"
+                    ;;
+                *)
+                    printf "get_repo_of_rpm: unrecognized: %s\n" \
+                           "$SRC_RPM_NAME" \
+                           >&2
+                    false
+                    ;;
+            esac
+            ;;
+        *)
+            printf "%s" "$REPO"
+            ;;
+    esac
+}
+rpm_copy_source_modifications()
+{
+    local RPM="$1"
+    local DEST="$2"
+    local SRC_RPM_NAME="$(get_name_of_corresponding_src_rpm "$RPM")"
+    case $SRC_RPM_NAME in
+        mingw-gcc)
+            cp "$HOME/rpmbuild/SPECS/mingw-gcc.spec" "$DEST"
+            ;;
+        glibc|gmp|mingw-binutils|mingw-crt|ncurses)
+            ;;
+        *)
+            printf "rpm_copy_source_modifications: unrecognized: %s\n" \
+                   "$SRC_RPM_NAME" \
+                   >&2
+            false
+            ;;
+    esac
 }
 get_upstream_url_for_rpm()
 {
     local RPM="$1"
     rpm -q --queryformat="%{URL}\n" "$RPM"
 }
-rpm_get_corresponding_src_url_etc()
+rpm_copy_corresponding_src_or_url()
 {
     local RPM="$1"
+    local DEST="$2"
     local CENTOS_VERSION="$(cat /etc/centos-release \
                             | grep -oe '[0-9]\+\(\.[0-9]\+\)*')"
     local CENTOS_VERSION_MAJOR="$(grep -oe '^[0-9]\+' <<<"$CENTOS_VERSION")"
@@ -346,16 +387,20 @@ rpm_get_corresponding_src_url_etc()
             local RPM_EXTRA_INFO="RPM Mirror List: $RPM_MIRROR_LIST"
             ;;
         *)
-            printf "rpm_get_corresponding_src_url_etc: unrecognized: %s\n" \
+            printf "rpm_copy_corresponding_src_or_url: unrecognized: %s\n" \
                    "$REPO_LOWERCASE" \
                    >&2
             false
             ;;
     esac
     local FILENAME="$(get_filename_of_corresponding_src_rpm "$RPM")"
+    if grep -qe '\.brainsick[0-9]\+' <<<"$FILENAME"; then
+        local FILENAME="$(sed -e 's/\.brainsick[0-9]\+//' <<<"$FILENAME")"
+        rpm_copy_source_modifications "$RPM" "$DEST"
+    fi
     local URL="$BASE_URL/$FILENAME"
     local UPSTREAM_URL="$(get_upstream_url_for_rpm "$RPM")"
-    cat <<EOF
+    cat <<EOF > "$DEST/source-code.txt"
 RPM URL: $URL
 $RPM_EXTRA_INFO
 Upstream URL: $UPSTREAM_URL
@@ -368,7 +413,7 @@ attribute_rpm()
     local DEST="usr/share/doc/$SRC_RPM_NAME"
     mkdir -p "$DEST"
     rpm_copy_license "$RPM" "$DEST"
-    rpm_get_corresponding_src_url_etc "$RPM" > "$DEST/source-code.txt"
+    rpm_copy_corresponding_src_or_url "$RPM" "$DEST"
 }
 attribute_rpms()
 {

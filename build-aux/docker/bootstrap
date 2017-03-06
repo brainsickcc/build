@@ -40,21 +40,35 @@ sudo yum install -y \
      help2man \
      ImageMagick \
      mingw32-binutils \
-     mingw32-crt \
-     mingw32-gcc \
      ncurses-devel \
+     rpm-build \
      wget \
      yum-utils \
      zlib-devel \
      ;
 
-sudo adduser -s /sbin/nologin mockbuild # Prevent warning during rpm -i.
-sudo usermod -aG fuse "$USER" # For AppImage generation
+# For building RPMs.  Also, prevents warning during rpm -i.
+sudo adduser -s /sbin/nologin mockbuild
+# For AppImage generation
+sudo usermod -aG fuse "$USER"
 
-# Download MinGW source so we can place COPYING.RUNTIME into the
-# AppImage.
+# Compile MinGW ourselves.  32-bit Rust cross compilation to Windows
+# requires DW2, not SJLJ, exception handling.
 yumdownloader --source mingw32-gcc
 rpm -i mingw-gcc-*.src.rpm
+cp mingw-gcc.spec "$HOME/rpmbuild/SPECS"
+# Nowadays mock seems preferred to using rpmbuild directly.  However,
+# mock requires privileged access to /proc, which is not possible when
+# building a docker container.
+rpmbuild -bs "$HOME/rpmbuild/SPECS/mingw-gcc.spec"
+set +f \
+    && sudo yum-builddep -y "$HOME/rpmbuild/SRPMS/mingw-gcc-"*".src.rpm" \
+    && set -f
+rpmbuild -bb "$HOME/rpmbuild/SPECS/mingw-gcc.spec"
+set +f \
+    && sudo yum localinstall \
+            -y "$HOME/rpmbuild/RPMS/$(arch)/mingw"*".$(arch).rpm" \
+    && set -f
 
 # Don't get LLVM from EPEL.  With EPEL's version, when we try to link
 # bscc we discover the .so version of libffi is wrong.

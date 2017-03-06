@@ -23,8 +23,8 @@ RUN yum install -y sudo && \
     echo 'build:build' | chpasswd
 
 WORKDIR /home/build
-COPY bootstrap .
-RUN chown build:build bootstrap
+COPY bootstrap mingw-gcc.spec ./
+RUN chown build:build bootstrap mingw-gcc.spec
 RUN su build -c ./bootstrap
 RUN rm bootstrap
 

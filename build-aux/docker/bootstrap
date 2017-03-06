@@ -125,3 +125,14 @@ stack build --prefetch --dry-run
 popd
 rm -rf "$WORKDIR/bscc-small-copy"
 popd
+
+RUST_VERSION=1.15.1
+RUST_TOOLCHAIN="$RUST_VERSION"
+if command -v rustup >/dev/null 2>&1; then
+    true
+else
+    curl https://sh.rustup.rs -sSf \
+        | sh -s -- -y --default-toolchain="$RUST_TOOLCHAIN"
+    source "$HOME/.cargo/env"
+fi
+rustup target add --toolchain="$RUST_TOOLCHAIN" i686-pc-windows-gnu

@@ -160,6 +160,19 @@ attribute_brainsick()
     cp "$SRCDIR/COPYING" .
     cp "$SRCDIR/NEWS" .
     cp "$SRCDIR/README" .
+
+    pushd "$SRCDIR/.." # Brainsick build, not bscc submodule
+    local COMMIT="$(git rev-parse --verify HEAD)"
+    # With newer git could use higher level: git ls-remote --get-url.
+    local URL="$(git config --get remote.origin.url)"
+    popd
+    cat <<EOF > "source-code.txt"
+$URL
+Mirror: https://github.com/brainsickcc/build
+Commit: $COMMIT
+
+Homepage: https://www.brainsick.cc
+EOF
 }
 
 attribute_llvm()
